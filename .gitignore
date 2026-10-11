@@ -1,3 +1,9 @@
+# Python virtual environment
+.venv/
+
+# PyCharm IDE
+.idea/
+
 # Ignore list for Eagle, a PCB layout tool
 
 # Backup files
