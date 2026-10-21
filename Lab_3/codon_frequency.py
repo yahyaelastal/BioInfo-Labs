@@ -1,14 +1,19 @@
 """
 Codon Frequency Analyzer
 Reads a FASTA file (virus or bacteria genome), counts codon frequencies
-using a sliding window of 3, and reports the top 10 codons with their
-associated amino acids.
+across ALL 6 reading frames (3 forward + 3 reverse complement), reports
+the top 10 most frequent codons, and uses the Claude API to suggest foods
+that are low in the associated amino acids.
+
+Requires:
+    pip install matplotlib transformers torch
 """
 
 import os
 from collections import Counter
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from transformers import pipeline
 
 
 # Standard genetic code (DNA codon table)
@@ -66,19 +71,30 @@ def read_fasta(filepath):
     return sequences
 
 
-def sliding_window_codons(sequence):
+COMPLEMENT = str.maketrans('ACGT', 'TGCA')
+
+def reverse_complement(sequence):
+    """Return the reverse complement of a DNA sequence."""
+    return sequence.translate(COMPLEMENT)[::-1]
+
+
+def all_frames_codons(sequence):
     """
-    Count codons using a sliding window of size 3.
-    Window slides one nucleotide at a time: positions 0-2, 1-3, 2-4, ...
-    Only complete 3-nt windows are counted; ambiguous bases (N, etc.) are skipped.
+    Count codons across all 6 reading frames:
+      - 3 forward frames: start at position 0, 1, 2 (step 3)
+      - 3 reverse frames: same on the reverse complement strand
+    Only complete codons (3 nt) of valid bases are counted.
     """
     counts = Counter()
     valid_bases = set('ACGT')
+    strands = [sequence, reverse_complement(sequence)]
 
-    for i in range(len(sequence) - 2):
-        codon = sequence[i:i + 3]
-        if all(b in valid_bases for b in codon):
-            counts[codon] += 1
+    for strand in strands:
+        for frame in range(3):                      # frames 0, 1, 2
+            for i in range(frame, len(strand) - 2, 3):
+                codon = strand[i:i + 3]
+                if len(codon) == 3 and all(b in valid_bases for b in codon):
+                    counts[codon] += 1
 
     return counts
 
@@ -94,7 +110,7 @@ def display_results(header, counts, top_n=10):
     print()
     print('=' * 65)
     print(f' Genome: {header[:60]}')
-    print(f' Total sliding-window codons counted: {total:,}')
+    print(f' Total codons counted (all 6 frames): {total:,}')
     print('=' * 65)
     print(f'  {"Rank":<5} {"Codon":<8} {"Count":>10} {"Frequency":>12}  {"Amino Acid"}')
     print('-' * 65)
@@ -149,6 +165,59 @@ def plot_results(header, counts, top_n=10):
     plt.show()
 
 
+def ask_llm_for_foods(counts, top_n=10):
+    """
+    Build a prompt with the top-n codons and their amino acids,
+    then ask a local TinyLlama model for foods lowest in those amino acids.
+    Model is downloaded automatically on first run (~1.1 GB).
+    """
+    top = counts.most_common(top_n)
+    codon_aa_list = [(codon, get_amino_acid(codon)) for codon, _ in top]
+
+    lines = []
+    for rank, (codon, aa) in enumerate(codon_aa_list, 1):
+        lines.append(f"  {rank}. {codon} -> {aa}")
+    codon_table_str = "\n".join(lines)
+
+    prompt = (
+        f"The following are the top {top_n} most frequent codons found in the "
+        f"SARS-CoV-2 genome, with their associated amino acids:\n\n"
+        f"{codon_table_str}\n\n"
+        f"For each unique amino acid in this list, provide 3 to 5 common foods "
+        f"that contain the LOWEST amounts of that amino acid. "
+        f"Format the answer as a simple list grouped by amino acid."
+    )
+
+    print('\n' + '=' * 65)
+    print(' STEP 3 – LLM Query (local TinyLlama)')
+    print('=' * 65)
+    print(' Loading model (downloads ~1.1 GB on first run)...')
+
+    try:
+        llm = pipeline(
+            "text-generation",
+            model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            max_new_tokens=512,
+        )
+
+        messages = [
+            {"role": "system", "content": "You are a helpful nutrition assistant."},
+            {"role": "user",   "content": prompt},
+        ]
+
+        output = llm(messages)[0]["generated_text"]
+
+        # The pipeline returns the full conversation — print only the last reply
+        last = output[-1] if isinstance(output, list) else output
+        answer = last.get("content", last) if isinstance(last, dict) else str(last)
+        print('\n' + answer)
+
+    except Exception as e:
+        print(f"ERROR running local model: {e}")
+
+    print('=' * 65 + '\n')
+
+
 def main():
     filepath = 'GCF_009858895.2_ASM985889v3_genomic.fna'
 
@@ -167,9 +236,10 @@ def main():
 
     for header, seq in sequences.items():
         print(f'Processing sequence ({len(seq):,} bp) ...')
-        counts = sliding_window_codons(seq)
+        counts = all_frames_codons(seq)
         display_results(header, counts, top_n=10)
         plot_results(header, counts, top_n=10)
+        ask_llm_for_foods(counts, top_n=10)
 
 
 if __name__ == '__main__':
