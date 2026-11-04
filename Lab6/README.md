@@ -2,7 +2,10 @@
 
 ## Overview
 
-This program generates an artificial DNA sequence and simulates the insertion of transposable elements (transposons) into it. It then runs a detection algorithm to find those transposons by their structural signatures (inverted repeats), and visualizes the results in a two-panel graph.
+This lab has two parts:
+
+- **Part 1 (`lab6.py`):** Generates an artificial DNA sequence, simulates the insertion of transposable elements covering all three structural cases, runs a detection algorithm, and visualizes the results.
+- **Part 2 (`lab6_part2.py`):** Reads a real genome from a `.fna` file and scans it for transposon candidates using inverted repeat signatures, with deduplication and genome-wide visualization.
 
 ---
 
@@ -128,8 +131,14 @@ Dark blocks at each end of a bar represent the inverted repeat regions.
 
 ## How to Run
 
+**Part 1 — Synthetic DNA simulator:**
 ```bash
 python lab6.py
+```
+
+**Part 2 — Real genome scanner:**
+```bash
+python lab6_part2.py
 ```
 
 **Requirements:** Python 3, matplotlib
@@ -140,5 +149,51 @@ pip install matplotlib
 
 ---
 
+## Part 2 — Real Genome Scanner
+
+### File
+`lab6_part2.py` — reads any `.fna` (FASTA nucleotide) file and detects transposon candidates.
+
+### Genome Used
+`GCF_009858895.2_ASM985889v3_genomic.fna` — SARS-CoV-2 (Wuhan-Hu-1), complete genome, 29,903 bp.
+
+### Detection Parameters
+
+| Parameter | Value | Reason |
+|-----------|-------|--------|
+| IR length | 8 bp | Longer than 6 bp to reduce random matches in a 30kb genome |
+| Min body length | 10 bp | As specified — minimum meaningful transposon body |
+| Max TE length | 500 bp | Caps spurious long-range coincidental matches |
+| Max IR frequency | 3 occurrences | IRs appearing many times are likely random repeats, not TE signatures |
+
+### Algorithm Steps
+1. Build an index of all 8-mers and their positions in the genome.
+2. For each 8-mer that appears ≤3 times, check if its reverse complement also appears ≤3 times downstream.
+3. If the gap (body) is ≥10 bp and total length ≤500 bp, record it as a candidate.
+4. **Deduplicate:** cluster candidates whose start and end positions differ by ≤8 bp (sliding-window artifacts from the same real site) and keep only the shortest-body representative per cluster.
+5. Classify each remaining candidate as independent, nested, or overlapping based on spatial relationships.
+
+### Output
+- **Terminal:** full list of candidates with position, length, IR sequences, and case.
+- **`transposons_genome.png`:** two-panel figure:
+  - *Top:* genome map with candidates as colored bars in stacked lanes.
+  - *Bottom:* density histogram (candidates per 500 bp window) showing hotspots.
+
+### Results on SARS-CoV-2
+- **216 candidates** detected after deduplication.
+- Density hotspots observed around positions ~6,500–7,500, ~12,500–13,500, and ~22,000–24,000.
+
+### Key Biological Finding
+
+> **SARS-CoV-2 is an RNA virus and does not have transposable elements.**
+
+All 216 candidates are coincidental inverted repeat matches in the nucleotide sequence — not real transposons. This result demonstrates a critical principle in bioinformatics:
+
+**Algorithmic output must always be interpreted in biological context.** The detector works correctly — it finds every IR pair meeting the structural criteria — but the genome chosen has no actual transposons to find. Running the same algorithm on a eukaryotic genome (plant, insect, or mammal) would yield biologically meaningful candidates, since those genomes contain large families of known TEs (LINE, SINE, DNA transposons, etc.).
+
+The density plot is still informative: regions with many IR-like patterns in SARS-CoV-2 may correspond to RNA secondary structure elements or replication signals, which is a separate but interesting biological observation.
+
+---
+
 ## Author
-Yahya Elastal — Bioinformatics Lab 6
+Yahya El-Astal — Bioinformatics Lab 6
